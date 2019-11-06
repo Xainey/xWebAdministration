@@ -47,15 +47,15 @@ function Get-TargetResource
 
         $handler = Get-IisHandler -Name $Name -SiteName $SiteName
 
-        if ($handler )
+        if ($handler)
         {
             $Ensure = 'Present'
             $modulePresent = $true;
-        }
 
-        foreach ($thisVerb  in $handler.Verb)
-        {
-            $currentVerbs += $thisVerb
+            foreach($thisVerb in $handler.Verb.Split(','))
+            {
+                $currentVerbs += $thisVerb
+            }
         }
 
         $fastCgiSetup = $false
@@ -63,8 +63,7 @@ function Get-TargetResource
         if ($handler.Modules -eq 'FastCgiModule')
         {
             $fastCgi = Get-WebConfiguration /system.webServer/fastCgi/* `
-                        -PSPath (Get-IisSitePath `
-                        -SiteName $SiteName) | `
+                        -PSPath (Get-IisSitePath) | `
                         Where-Object{$_.FullPath -ieq $handler.ScriptProcessor}
             if ($fastCgi)
             {
@@ -142,19 +141,20 @@ function Set-TargetResource
         if (-not $resourceTests.ModulePresent -or -not $resourceTests.ModuleConfigured)
         {
             Write-Verbose -Message $script:localizedData.VerboseSetTargetAddHandler
-            Add-webconfiguration /system.webServer/handlers iis:\ -Value @{
+            Set-WebConfiguration /system.webServer/handlers -PSPath (Get-IisSitePath) -Metadata 'overrideMode' -Value 'Allow'
+            Add-WebConfiguration /system.webServer/handlers -PSPath (Get-IisSitePath -SiteName $SiteName) -Value @{
                 Name = $Name
                 Path = $RequestPath
                 Verb = $Verb -join ','
-                Module = $ModuleType
+                Modules = $ModuleType
                 ScriptProcessor = $Path
             }
         }
 
-        if (-not $resourceTests.EndPointSetup)
+        if (-not $resourceStatus.EndPointSetup)
         {
             Write-Verbose -Message $script:localizedData.VerboseSetTargetAddfastCgi
-            Add-WebConfiguration /system.webServer/fastCgi iis:\ -Value @{
+            Add-WebConfiguration /system.webServer/fastCgi (Get-IisSitePath) -Value @{
                 FullPath = $Path
             }
         }
@@ -341,19 +341,19 @@ function Test-TargetResourceImpl
     )
 
     $matchedVerbs = @()
-    $mismatchVerbs =@()
-    foreach ($thisVerb  in $resourceStatus.Verb)
+    $mismatchVerbs = @()
+    foreach ($thisVerb in $resourceStatus.Verb)
     {
         if ($Verb -icontains $thisVerb)
         {
             Write-Verbose -Message ($script:localizedData.VerboseTestTargetResourceImplVerb `
-                            -f $Verb)
+                            -f $thisVerb)
             $matchedVerbs += $thisVerb
         }
         else
         {
             Write-Verbose -Message ($script:localizedData.VerboseTestTargetResourceImplExtraVerb `
-                            -f $Verb)
+                            -f $thisVerb)
             $mismatchVerbs += $thisVerb
         }
     }
@@ -376,7 +376,7 @@ function Test-TargetResourceImpl
     $moduleConfigured = $false
     if ($modulePresent -and `
         $mismatchVerbs.Count -eq 0 -and `
-        $matchedVerbs.Count-eq $Verb.Count -and `
+        $matchedVerbs.Count -eq $Verb.Count -and `
         $resourceStatus.Path -eq $Path -and `
         $resourceStatus.RequestPath -eq $RequestPath)
     {
